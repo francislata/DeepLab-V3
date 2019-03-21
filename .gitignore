@@ -10,8 +10,7 @@ __pycache__/
 *$py.class
 
 # Project-specific files
-dataset/train/
-dataset/test/
+dataset/*
 
 # Jupyter notebook related files
 .ipynb_checkpoints/
