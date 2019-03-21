@@ -1,0 +1,17 @@
+# MacOS related files
+.DS_Store
+
+# VSCode related files
+.vscode
+
+# Python related files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Project-specific files
+dataset/train/
+dataset/test/
+
+# Jupyter notebook related files
+.ipynb_checkpoints/
