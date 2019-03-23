@@ -25,22 +25,16 @@ class Bottleneck(nn.Module):
 
     def __init__(self, inplanes, planes, stride=1, dilation=1, downsample=None):
         super(Bottleneck, self).__init__()
+
+        self.downsample = downsample
+        self.stride = 1 if dilation > 1 else stride
         self.conv1 = nn.Conv2d(inplanes, planes, kernel_size=1, bias=False)
         self.bn1 = nn.BatchNorm2d(planes)
-
-        # This either creates an atrous or standard convolution.
-        # Note that if dilation != 1 then the stride has to be set to 1 to retain the output stride to be equal to its input's output stride.
-        if dilation != 1:
-            self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, dilation=dilation, padding=2, bias=False)
-        else:
-            self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
-
+        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, dilation=dilation, padding=dilation, stride=self.stride, bias=False)
         self.bn2 = nn.BatchNorm2d(planes)
         self.conv3 = nn.Conv2d(planes, planes * 4, kernel_size=1, bias=False)
         self.bn3 = nn.BatchNorm2d(planes * 4)
         self.relu = nn.ReLU(inplace=True)
-        self.downsample = downsample
-        self.stride = stride
 
     def forward(self, x):
         residual = x
@@ -90,10 +84,9 @@ class ResNet(nn.Module):
         downsample = None
         if stride != 1 or self.inplanes != planes * block.expansion:
             # The downsampling convolutional layer's stride has to be altered so that it matches the dimensions of the output dimensions of the bottleneck if the dilation != 1
-            stride = stride if dilation == 1 else 1
+            stride = 1 if dilation > 1 else stride
             downsample = nn.Sequential(
-                nn.Conv2d(self.inplanes, planes * block.expansion,
-                          kernel_size=1, stride=stride, bias=False),
+                nn.Conv2d(self.inplanes, planes * block.expansion, kernel_size=1, stride=stride, bias=False),
                 nn.BatchNorm2d(planes * block.expansion),
             )
 
