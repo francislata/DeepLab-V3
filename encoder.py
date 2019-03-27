@@ -36,6 +36,5 @@ class Encoder(nn.Module):
         """Creates a convolutional layer with upsampling and softmax"""
         return nn.Sequential(
             nn.Conv2d(in_channels, self.num_classes, 1),
-            nn.Upsample(scale_factor=scale_factor, mode="bilinear"),
-            nn.Softmax2d()
+            nn.Upsample(scale_factor=scale_factor, mode="bilinear")
         )
