@@ -35,7 +35,7 @@ class ASPP(nn.Module):
         return nn.Sequential(
             conv,
             nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True)
+            nn.ReLU()
         )
 
     def create_image_pooling_layer(self, in_channels, out_channels):
@@ -44,5 +44,5 @@ class ASPP(nn.Module):
             nn.AdaptiveAvgPool2d(1),
             nn.Conv2d(in_channels, out_channels, 1),
             nn.BatchNorm2d(out_channels), 
-            nn.ReLU(inplace=True)
+            nn.ReLU()
         )
