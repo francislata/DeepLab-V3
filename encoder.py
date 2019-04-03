@@ -2,9 +2,6 @@ from resnet import resnet101
 from aspp import ASPP
 import torch.nn as nn
 
-# Constants
-IMAGE_SIZE = (513, 513)
-
 class Encoder(nn.Module):
     """This is the implementation for combining the pre-trained backbone with the ASPP module."""
 
@@ -15,13 +12,16 @@ class Encoder(nn.Module):
         self.backbone = resnet101(pretrained=True)
         self.aspp = ASPP(2048, 256, [6, 12, 18])
         self.conv = self.create_convolutional_layer(1280, 256, 1)
-        self.conv_upsampling = self.create_convolutional_upsampling_layer(256, 1, IMAGE_SIZE)
+        self.final_conv = self.create_final_convolutional_layer(256, 1)
 
     def forward(self, x):
+        upsampling = nn.Upsample(size=(x.size(2), x.size(3)), align_corners=True, mode="bilinear")
+        
         x = self.backbone(x)
         x = self.aspp(x)
         x = self.conv(x)
-        x = self.conv_upsampling(x)
+        x = self.final_conv(x)
+        x = upsampling(x)
 
         return x
 
@@ -33,9 +33,6 @@ class Encoder(nn.Module):
             nn.ReLU()
         )
 
-    def create_convolutional_upsampling_layer(self, in_channels, kernel_size, image_size):
-        """Creates a convolutional layer with upsampling and softmax"""
-        return nn.Sequential(
-            nn.Conv2d(in_channels, self.num_classes, 1),
-            nn.Upsample(size=image_size, align_corners=True, mode="bilinear")
-        )
+    def create_final_convolutional_layer(self, in_channels, kernel_size):
+        """Creates a final convolutional layer"""
+        return nn.Conv2d(in_channels, self.num_classes, 1)
