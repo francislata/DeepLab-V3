@@ -20,7 +20,7 @@ class ASPP(nn.Module):
         conv4_y = self.conv4(x)
 
         # Bilinearly upsample the features to the height/width of the atrous convoluted feature
-        img_pool_upsampling = nn.Upsample(scale_factor=conv1_y.size(2), mode="bilinear", align_corners=True)
+        img_pool_upsampling = nn.Upsample(size=(conv1_y.size(2), conv1_y.size(3)), mode="bilinear", align_corners=True)
         img_pool_y = img_pool_upsampling(self.img_pool(x))
 
         return torch.cat([conv1_y, conv2_y, conv3_y, conv4_y, img_pool_y], dim=1)

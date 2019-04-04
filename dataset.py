@@ -5,40 +5,60 @@ import torch
 import numpy as np
 
 # Constants
-IMG_SIZE = (321, 321)
+CROP_IMG_SIZE = (768, 768)
 IGNORE_IDX = 255
 IMGNET_MEAN = [0.485, 0.456, 0.406]
 IMGNET_STD = [0.229, 0.224, 0.225]
-CITYSCAPES_ROOT_FILEPATH = "./cityscapes-dataset"
 
-def load_cityscapes_datasets():
+class CustomCityscapes(Cityscapes):
+    """This subclass overrides the current implementation of the Cityscapes datasets by PyTorch."""
+    def __getitem__(self, index):
+        image, target = super().__getitem__(index)
+        target = self._convert_id_to_train_id(target)
+
+        return image, target
+
+    def _convert_id_to_train_id(self, target):
+        """Converts each ID of a target image to train ID"""
+        for label in self.classes:
+            target[target == label.id] = label.train_id
+            
+        return target
+
+def load_cityscapes_datasets(filepath):
     """Loads the Cityscapes datasets"""
-    img_transforms = transforms.Compose([
-        transforms.Resize(IMG_SIZE),
+    train_img_transforms = transforms.Compose([
+        transforms.RandomCrop(CROP_IMG_SIZE),
         transforms.ToTensor(),
         transforms.Normalize(IMGNET_MEAN, IMGNET_STD)
     ])
-    anns_transforms = transforms.Compose([
-        transforms.Resize(IMG_SIZE, interpolation=PIL.Image.NEAREST),
+    train_anns_transforms = transforms.Compose([
+        transforms.RandomCrop(CROP_IMG_SIZE),
         transforms.Lambda(lambda img: torch.Tensor(np.array(img)))
     ])
 
-    train_ds = Cityscapes(
-        CITYSCAPES_ROOT_FILEPATH, 
+    eval_img_transforms = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(IMGNET_MEAN, IMGNET_STD)
+    ])
+    eval_anns_transforms = transforms.Lambda(lambda img: torch.Tensor(np.array(img)))
+
+    train_ds = CustomCityscapes(
+        filepath, 
         split="train", 
         mode="fine", 
         target_type="semantic", 
-        transform=img_transforms, 
-        target_transform=anns_transforms
+        transform=train_img_transforms, 
+        target_transform=train_anns_transforms
     )
 
-    valid_ds = Cityscapes(
-        CITYSCAPES_ROOT_FILEPATH, 
+    valid_ds = CustomCityscapes(
+        filepath, 
         split="val", 
         mode="fine", 
         target_type="semantic", 
-        transform=img_transforms, 
-        target_transform=anns_transforms
+        transform=eval_img_transforms, 
+        target_transform=eval_anns_transforms
     )
-
+    
     return train_ds, valid_ds, IGNORE_IDX
