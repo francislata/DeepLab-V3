@@ -28,12 +28,14 @@ class CustomCityscapes(Cityscapes):
 def load_cityscapes_datasets(filepath):
     """Loads the Cityscapes datasets"""
     train_img_transforms = transforms.Compose([
-        transforms.RandomCrop(CROP_IMG_SIZE),
+        transforms.RandomResizedCrop(CROP_IMG_SIZE, scale=(0.5, 2.0)),
+        transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize(IMGNET_MEAN, IMGNET_STD)
     ])
     train_anns_transforms = transforms.Compose([
-        transforms.RandomCrop(CROP_IMG_SIZE),
+        transforms.RandomResizedCrop(CROP_IMG_SIZE, scale=(0.5, 2.0)),
+        transforms.RandomHorizontalFlip(),
         transforms.Lambda(lambda img: torch.Tensor(np.array(img)))
     ])
 
