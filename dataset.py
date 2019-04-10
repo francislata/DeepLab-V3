@@ -34,7 +34,7 @@ def load_cityscapes_datasets(filepath):
         transforms.Normalize(IMGNET_MEAN, IMGNET_STD)
     ])
     train_anns_transforms = transforms.Compose([
-        transforms.RandomResizedCrop(CROP_IMG_SIZE, scale=(0.5, 2.0)),
+        transforms.RandomResizedCrop(CROP_IMG_SIZE, scale=(0.5, 2.0), interpolation=PIL.Image.NEAREST),
         transforms.RandomHorizontalFlip(),
         transforms.Lambda(lambda img: torch.Tensor(np.array(img)))
     ])

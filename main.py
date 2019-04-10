@@ -1,6 +1,7 @@
 from encoder import Encoder
 from dataset import load_cityscapes_datasets
 from utils import save_model_checkpoint, load_model_checkpoint, plot_save_losses
+from lr_scheduler import PolynomialLRScheduler
 from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from tqdm import tqdm
@@ -15,19 +16,21 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 TRAIN_BATCH_SIZE = 8
 EVAL_BATCH_SIZE = 8
 NUM_CLASSES = 19
-NUM_EPOCHS = 10
+NUM_EPOCHS = 5
 LR = 1e-2
 MOMENTUM = 0.9
+WEIGHT_DECAY = 5e-4
 
 def setup_model(ignore_index):
-    """Sets up a model, optimizer, and the loss function to use"""
+    """Sets up a model, optimizer, learning rate scheduler, and the loss function to use"""
     encoder_model = Encoder(NUM_CLASSES).to(DEVICE)
-    optimizer = optim.SGD(encoder_model.parameters(), lr=LR, momentum=MOMENTUM, nesterov=False, weight_decay=5e-4)
+    optimizer = optim.SGD(encoder_model.parameters(), lr=LR, momentum=MOMENTUM, nesterov=True)
+    lr_scheduler = PolynomialLRScheduler(optimizer, NUM_EPOCHS)
     loss_fn = nn.CrossEntropyLoss(ignore_index=ignore_index).to(DEVICE)
 
-    return encoder_model, optimizer, loss_fn
+    return encoder_model, optimizer, lr_scheduler, loss_fn
 
-def train(model, optimizer, loss_fn, train_ds, valid_ds, start_epoch=1, num_epochs=NUM_EPOCHS):
+def train(model, optimizer, lr_scheduler, loss_fn, train_ds, valid_ds, start_epoch=1, num_epochs=NUM_EPOCHS):
     """Trains the model"""
     train_dl = DataLoader(train_ds, batch_size=TRAIN_BATCH_SIZE, shuffle=True, num_workers=4)
     train_losses = []
@@ -37,6 +40,8 @@ def train(model, optimizer, loss_fn, train_ds, valid_ds, start_epoch=1, num_epoc
         print("[Epoch {}] Training and evaluation starts...".format(epoch))
 
         torch.cuda.empty_cache()
+        
+        lr_scheduler.step()
         
         model.train()
         total_loss = []
@@ -94,19 +99,19 @@ if __name__ == "__main__":
     train_ds, valid_ds, ignore_index = load_cityscapes_datasets(CITYSCAPES_ROOT_FILEPATH)
     print("Done!\n")
 
-    print("Setting up model, optimizer, and loss function...")
-    model, optimizer, loss_fn = setup_model(ignore_index)
+    print("Setting up model, optimizer, learning rate scheduler, and loss function...")
+    model, optimizer, lr_scheduler, loss_fn = setup_model(ignore_index)
     print("Done!\n")
 
     print("Training model...\n")
-    start_epoch, train_losses, valid_losses = load_model_checkpoint(model, optimizer, "deeplabv3_epoch20_lr{}".format(1e-2))
+    start_epoch, train_losses, valid_losses = load_model_checkpoint(model, optimizer, lr_scheduler, "deeplabv3_epoch5_lr{}".format(1e-2))
     # start_epoch = 0
     # train_losses, valid_losses = [], []
     num_epochs = start_epoch + NUM_EPOCHS
     start_epoch += 1
-    current_train_losses, current_valid_losses = train(model, optimizer, loss_fn, train_ds, valid_ds, start_epoch=start_epoch, num_epochs=num_epochs)
+    current_train_losses, current_valid_losses = train(model, optimizer, lr_scheduler, loss_fn, train_ds, valid_ds, start_epoch=start_epoch, num_epochs=num_epochs)
     train_losses.extend(current_train_losses)
     valid_losses.extend(current_valid_losses)
     plot_save_losses(train_losses, valid_losses, "Training and Validation Losses", "losses_epoch{}_lr{}".format(num_epochs, LR))
-    save_model_checkpoint(model, optimizer, train_losses, valid_losses, num_epochs, "deeplabv3_epoch{}_lr{}".format(num_epochs, LR))
+    save_model_checkpoint(model, optimizer, lr_scheduler, train_losses, valid_losses, num_epochs, "deeplabv3_epoch{}_lr{}".format(num_epochs, LR))
     print("Done!")
