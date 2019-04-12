@@ -18,6 +18,13 @@ class CustomCityscapes(Cityscapes):
 
         return image, target
 
+    def convert_train_id_to_id(self, img):
+        """Converts an images using train ID to ID"""
+        for label in self.classes:
+            img[img == label.train_id] = label.id
+
+        return img
+
     def _convert_id_to_train_id(self, target):
         """Converts each ID of a target image to train ID"""
         for label in self.classes:
