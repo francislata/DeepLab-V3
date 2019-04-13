@@ -19,11 +19,15 @@ class CustomCityscapes(Cityscapes):
         return image, target
 
     def convert_train_id_to_id(self, img):
-        """Converts an images using train ID to ID"""
+        """Converts an image from train ID to ID"""
+        # Note that train IDs that are ignored in evaluation will have an ID value of 0 which works because 0 is ignored in evaluation
+        final_img = torch.zeros(img.size())
+        
         for label in self.classes:
-            img[img == label.train_id] = label.id
-
-        return img
+            if not label.ignore_in_eval:
+                final_img[img == label.train_id] = label.id
+                
+        return final_img
 
     def _convert_id_to_train_id(self, target):
         """Converts each ID of a target image to train ID"""
