@@ -1,9 +1,10 @@
 from encoder import Encoder
 from dataset import load_cityscapes_datasets
-from utils import save_model_checkpoint, load_model_checkpoint, plot_save_losses
+from utils import save_model_checkpoint, load_model_checkpoint, plot_save_losses, create_lr_scheduler
 from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from tqdm import tqdm
+from cityscapesScripts.cityscapesscripts.evaluation.evalPixelLevelSemanticLabeling import main
 import torch
 import torch.optim as optim
 import torch.nn as nn
@@ -19,20 +20,25 @@ TRAIN_BATCH_SIZE = 8
 EVAL_BATCH_SIZE = 8
 EVAL_SAVE_BATCH_SIZE = 1
 NUM_CLASSES = 19
-NUM_EPOCHS = 20
+NUM_EPOCHS = 10
 LR = 1e-2
 MOMENTUM = 0.9
-IS_TRAINING_MODEL = False
+WEIGHT_DECAY = 1e-4
+GAMMA = 0.1
+STEP_SIZE = 5
+IS_TRAINING_MODEL = True
 
 def setup_model(ignore_index):
-    """Sets up a model, optimizer, and the loss function to use"""
+    """Sets up the model"""
     encoder_model = Encoder(NUM_CLASSES).to(DEVICE)
-    optimizer = optim.SGD(encoder_model.parameters(), lr=LR, momentum=MOMENTUM, nesterov=True)
+    optimizer = optim.SGD(encoder_model.parameters(), lr=LR, momentum=MOMENTUM, weight_decay=WEIGHT_DECAY)
+#     lr_scheduler = create_lr_scheduler(optimizer, STEP_SIZE, GAMMA)
+    lr_scheduler = None
     loss_fn = nn.CrossEntropyLoss(ignore_index=ignore_index).to(DEVICE)
 
-    return encoder_model, optimizer, loss_fn
+    return encoder_model, optimizer, lr_scheduler, loss_fn
 
-def train(model, optimizer, loss_fn, train_ds, valid_ds, start_epoch=1, num_epochs=NUM_EPOCHS):
+def train(model, optimizer, loss_fn, train_ds, valid_ds, start_epoch=1, num_epochs=NUM_EPOCHS, lr_scheduler=None):
     """Trains the model"""
     train_dl = DataLoader(train_ds, batch_size=TRAIN_BATCH_SIZE, shuffle=True, num_workers=4)
     train_losses = []
@@ -42,6 +48,9 @@ def train(model, optimizer, loss_fn, train_ds, valid_ds, start_epoch=1, num_epoc
         print("[Epoch {}] Training and evaluation starts...".format(epoch))
 
         torch.cuda.empty_cache()
+
+        if lr_scheduler is not None:
+            lr_scheduler.step()
         
         model.train()
         total_loss = []
@@ -59,11 +68,16 @@ def train(model, optimizer, loss_fn, train_ds, valid_ds, start_epoch=1, num_epoc
             optimizer.step()
 
         epoch_loss = sum(total_loss) / len(total_loss)
-        train_losses.append(epoch_loss)
+        train_losses.extend(total_loss)
 
         print("[Epoch {}] Training loss is {:.2f}".format(epoch, epoch_loss))
 
-        valid_losses.append(evaluate(model, loss_fn, valid_ds))
+        valid_losses.extend(evaluate(model, loss_fn, valid_ds))
+
+        if epoch % 5 == 0:
+            evaluate_save_predictions(model, valid_ds, CITYSCAPES_RESULTS_FILEPATH)
+            mIoU = main()
+            print("[Epoch {}] mIoU is {:.2f}".format(epoch, mIoU))
 
         print("[Epoch {}] Training and evaluation complete!\n".format(epoch))
 
@@ -85,10 +99,9 @@ def evaluate(model, loss_fn, dataset):
             outputs = model(imgs)
             total_loss.append(loss_fn(outputs, anns).item())
 
-        loss = sum(total_loss) / len(total_loss)
-        print("Evaluation loss is {:.2f}".format(loss))
+        print("Evaluation loss is {:.2f}".format(sum(total_loss) / len(total_loss)))
 
-        return loss
+        return total_loss
 
 def evaluate_save_predictions(model, dataset, filepath):
     """Evaluates the model with the given dataset and saves the entries in the given filepath"""
@@ -117,22 +130,22 @@ if __name__ == "__main__":
     train_ds, valid_ds, ignore_index = load_cityscapes_datasets(CITYSCAPES_ROOT_FILEPATH)
     print("Done!\n")
 
-    print("Setting up model, optimizer, and loss function...")
-    model, optimizer, loss_fn = setup_model(ignore_index)
+    print("Setting up model, optimizer, learning rate scheduler, and loss function...")
+    model, optimizer, lr_scheduler, loss_fn = setup_model(ignore_index)
     print("Done!\n")
 
     if IS_TRAINING_MODEL:
         print("Training model...\n")
-        # start_epoch, train_losses, valid_losses = load_model_checkpoint(model, optimizer, "deeplabv3_epoch25_lr{}".format(1e-1))
-        start_epoch = 0
-        train_losses, valid_losses = [], []
+        start_epoch, train_losses, valid_losses = load_model_checkpoint(model, optimizer, "deeplabv3_epoch60_lr0.01", lr_scheduler)
+#         start_epoch = 0
+#         train_losses, valid_losses = [], []
         num_epochs = start_epoch + NUM_EPOCHS
         start_epoch += 1
-        current_train_losses, current_valid_losses = train(model, optimizer, loss_fn, train_ds, valid_ds, start_epoch=start_epoch, num_epochs=num_epochs)
+        current_train_losses, current_valid_losses = train(model, optimizer, loss_fn, train_ds, valid_ds, start_epoch=start_epoch, num_epochs=num_epochs, lr_scheduler=lr_scheduler)
         train_losses.extend(current_train_losses)
         valid_losses.extend(current_valid_losses)
         plot_save_losses(train_losses, valid_losses, "Training and Validation Losses", "losses_epoch{}_lr{}".format(num_epochs, LR))
-        save_model_checkpoint(model, optimizer, train_losses, valid_losses, num_epochs, "deeplabv3_epoch{}_lr{}".format(num_epochs, LR))
+        save_model_checkpoint(model, optimizer, train_losses, valid_losses, num_epochs, "deeplabv3_epoch{}_lr{}".format(num_epochs, LR), lr_scheduler=lr_scheduler)
         print("Done!")
     else:
         print("Loading pretrained model...")
@@ -140,3 +153,4 @@ if __name__ == "__main__":
         print("Done!\n")
 
         evaluate_save_predictions(model, valid_ds, CITYSCAPES_RESULTS_FILEPATH)
+        main()
