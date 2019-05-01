@@ -8,31 +8,38 @@ class Encoder(nn.Module):
     def __init__(self, num_classes):
         super(Encoder, self).__init__()
 
-        self.num_classes = num_classes
         self.backbone = resnet101(pretrained=True)
         self.aspp = ASPP(2048, 256, [6, 12, 18])
         self.conv = self.create_convolutional_layer(1280, 256, 1)
-        self.final_conv = self.create_final_convolutional_layer(256, 1)
+        self.final_conv = self.create_convolutional_layer(256, num_classes, 1, with_bn=False)
 
     def forward(self, x):
-        upsampling = nn.Upsample(size=(x.size(2), x.size(3)), align_corners=True, mode="bilinear")
-        
+        size = (x.size(2), x.size(3))
         x = self.backbone(x)
         x = self.aspp(x)
         x = self.conv(x)
         x = self.final_conv(x)
-        x = upsampling(x)
+        x = nn.functional.interpolate(x, size=size, mode="bilinear", align_corners=True)
 
         return x
 
-    def create_convolutional_layer(self, in_channels, out_channels, kernel_size):
-        """Creates a convolutional layer with batch normalization"""
-        return nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU()
-        )
+    def create_convolutional_layer(self, in_channels, out_channels, kernel_size, with_bn=True):
+        """Creates a convolutional layer with optional batch normalization"""
+        if with_bn:
+            convolutional_layer = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size),
+                nn.ReLU(inplace=True),
+                nn.BatchNorm2d(out_channels)
+            )
+        else:
+            convolutional_layer = nn.Sequential(nn.Conv2d(in_channels, out_channels, kernel_size))
 
-    def create_final_convolutional_layer(self, in_channels, kernel_size):
-        """Creates a final convolutional layer"""
-        return nn.Conv2d(in_channels, self.num_classes, 1)
+        self._initialize_modules(convolutional_layer)
+        return convolutional_layer
+
+    def _initialize_modules(self, modules):
+        """Initializes the weights and bias of modules"""
+        for m in modules:
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, a=1)
+                nn.init.constant_(m.bias, 0)

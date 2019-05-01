@@ -1,19 +1,45 @@
 from torchvision.datasets import Cityscapes
 import torchvision.transforms as transforms
+import torchvision.transforms.functional as F
 import PIL
 import torch
 import numpy as np
+import random
 
 # Constants
 CROP_IMG_SIZE = (768, 768)
-IGNORE_IDX = 255
 IMGNET_MEAN = [0.485, 0.456, 0.406]
 IMGNET_STD = [0.229, 0.224, 0.225]
+HFLIP_PROB = 0.5
 
 class CustomCityscapes(Cityscapes):
     """This subclass overrides the current implementation of the Cityscapes datasets by PyTorch."""
+    def __init__(self, root, split='train', mode='fine', target_type='instance', transform=None, target_transform=None):
+        super(CustomCityscapes, self).__init__(root, split=split, mode=mode, target_type=target_type, transform=transform, target_transform=target_transform)
+        
+        if self.split == "train":
+            self.random_resized_crop_transform = transforms.RandomResizedCrop(CROP_IMG_SIZE, scale=(0.5, 2.0), ratio=(1.0, 1.0))
+            self.img_transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize(IMGNET_MEAN, IMGNET_STD)
+            ])
+            self.ann_transform = transforms.Lambda(lambda img: torch.Tensor(np.array(img)))
+            
     def __getitem__(self, index):
         image, target = super().__getitem__(index)
+
+        if self.split == "train":
+            i, j, h, w = self.random_resized_crop_transform.get_params(image, self.random_resized_crop_transform.scale, self.random_resized_crop_transform.ratio)
+            image = F.resized_crop(image, i, j, h, w, self.random_resized_crop_transform.size, PIL.Image.BILINEAR)
+            target = F.resized_crop(target, i, j, h, w, self.random_resized_crop_transform.size, PIL.Image.NEAREST)
+
+            if random.random() <= HFLIP_PROB:
+                image = F.hflip(image)
+                target = F.hflip(target)
+
+            image = self.img_transform(image)
+            target = self.ann_transform(target)
+            
         target = self._convert_id_to_train_id(target)
 
         return image, target
@@ -38,18 +64,6 @@ class CustomCityscapes(Cityscapes):
 
 def load_cityscapes_datasets(filepath):
     """Loads the Cityscapes datasets"""
-    train_img_transforms = transforms.Compose([
-        transforms.RandomResizedCrop(CROP_IMG_SIZE, scale=(0.5, 2.0)),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(IMGNET_MEAN, IMGNET_STD)
-    ])
-    train_anns_transforms = transforms.Compose([
-        transforms.RandomResizedCrop(CROP_IMG_SIZE, scale=(0.5, 2.0), interpolation=PIL.Image.NEAREST),
-        transforms.RandomHorizontalFlip(),
-        transforms.Lambda(lambda img: torch.Tensor(np.array(img)))
-    ])
-
     eval_img_transforms = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(IMGNET_MEAN, IMGNET_STD)
@@ -61,8 +75,8 @@ def load_cityscapes_datasets(filepath):
         split="train", 
         mode="fine", 
         target_type="semantic", 
-        transform=train_img_transforms, 
-        target_transform=train_anns_transforms
+        transform=None, 
+        target_transform=None
     )
 
     valid_ds = CustomCityscapes(
@@ -74,4 +88,4 @@ def load_cityscapes_datasets(filepath):
         target_transform=eval_anns_transforms
     )
     
-    return train_ds, valid_ds, IGNORE_IDX
+    return train_ds, valid_ds

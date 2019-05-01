@@ -20,8 +20,7 @@ class ASPP(nn.Module):
         conv4_y = self.conv4(x)
 
         # Bilinearly upsample the features to the height/width of the atrous convoluted feature
-        img_pool_upsampling = nn.Upsample(size=(conv1_y.size(2), conv1_y.size(3)), mode="bilinear", align_corners=True)
-        img_pool_y = img_pool_upsampling(self.img_pool(x))
+        img_pool_y = nn.functional.interpolate(self.img_pool(x), size=(conv1_y.size(2), conv1_y.size(3)), mode="bilinear", align_corners=True)
 
         return torch.cat([conv1_y, conv2_y, conv3_y, conv4_y, img_pool_y], dim=1)
 
@@ -32,17 +31,30 @@ class ASPP(nn.Module):
         else:
             conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size)
             
-        return nn.Sequential(
+        conv_layer = nn.Sequential(
             conv,
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU()
+            nn.ReLU(inplace=True),
+            nn.BatchNorm2d(out_channels)
         )
+        
+        self._initialize_modules(conv_layer)
+        return conv_layer
 
     def create_image_pooling_layer(self, in_channels, out_channels):
         """Creates the image pooling layer as input to ASPP module"""
-        return nn.Sequential(
+        image_pooling_layer = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
             nn.Conv2d(in_channels, out_channels, 1),
-            nn.BatchNorm2d(out_channels), 
-            nn.ReLU()
+            nn.ReLU(inplace=True),
+            nn.BatchNorm2d(out_channels)
         )
+        
+        self._initialize_modules(image_pooling_layer)
+        return image_pooling_layer
+    
+    def _initialize_modules(self, modules):
+        """Initializes the weights and bias of modules"""
+        for m in modules:
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, a=1)
+                nn.init.constant_(m.bias, 0)
