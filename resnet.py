@@ -1,6 +1,7 @@
 # This is a modified version of PyTorch's original implementation of ResNet model architecture.
 # Credits: https://github.com/pytorch/vision/blob/master/torchvision/models/resnet.py
 
+from model_utils import initialize_module_weights
 import torch.nn as nn
 import math
 import torch.utils.model_zoo as model_zoo
@@ -67,12 +68,7 @@ class ResNet(nn.Module):
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(512 * block.expansion, num_classes)
 
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-            elif isinstance(m, (nn.BatchNorm2d)):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
+        initialize_module_weights(self)
 
     def _make_layer(self, block, planes, blocks, stride=1, dilation=1):
         """Creates a block layer as part of the entire ResNet model"""

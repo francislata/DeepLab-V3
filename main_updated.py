@@ -11,11 +11,12 @@ import torch.optim as optim
 import torch.nn as nn
 import torch
 import os
+import random
 
 # Constants
 LEARNING_RATE = 1e-2
 MOMENTUM = 0.9
-WEIGHT_DECAY = 1e-4
+WEIGHT_DECAY = 5e-4
 SAVE_CHECKPOINT_INDEX = 5
 TRAIN_BATCH_SIZE, EVAL_BATCH_SIZE, EVAL_METRIC_BATCH_SIZE = 8, 8, 1
 NUM_EPOCHS = 30
@@ -46,8 +47,8 @@ def train(model, optimizer, loss_fn, train_ds, valid_ds, start_epoch, num_epochs
         total_loss = []
 
         for idx, (imgs, anns) in enumerate(tqdm(train_dl, desc="Training progress")):
-            lr_scheduler.step(epoch - 1, idx)
             optimizer.zero_grad()
+            lr_scheduler.step(epoch - 1, idx)
 
             imgs, anns = imgs.to(DEVICE), anns.squeeze().long().to(DEVICE)
             outputs = model(imgs)
@@ -65,15 +66,18 @@ def train(model, optimizer, loss_fn, train_ds, valid_ds, start_epoch, num_epochs
 
         valid_losses.append(evaluate(model, loss_fn, valid_ds, args))
 
+        # TODO: Fix this issue
         if epoch % args.save_checkpoint_index == 0:
-            print("[Epoch {}] Calculating mIoU...".format(epoch))
-            # TODO: Fix this issue
+            print("Saving checkpoint and plotting losses...")
+            save_model_checkpoint(model, optimizer, train_losses, valid_losses, num_epochs, "deeplabv3_epoch{}_lr{}_wd{}".format(epoch, args.learning_rate, args.weight_decay))
+            plot_save_losses(train_losses, valid_losses, "Training and Validation Losses", "deeplabv3_epoch{}_lr{}_wd{}".format(epoch, args.learning_rate, args.weight_decay))
+            print("Done!\n")
+            # print("[Epoch {}] Calculating mIoU...".format(epoch))
 #             evaluate_save_predictions(model, valid_ds, args)
 #             mIoU = evalPixelLevelSemanticLabeling.main()
-            mIoU = 0.0
-            save_model_checkpoint(model, optimizer, train_losses, valid_losses, num_epochs, "deeplabv3_epoch{}_lr{}_wd{}_mIoU{:.3f}".format(epoch, args.learning_rate, args.weight_decay, mIoU))
-            plot_save_losses(train_losses, valid_losses, "Training and Validation Losses", "deeplabv3_epoch{}_lr{}_wd{}_mIoU{:.3f}".format(epoch, args.learning_rate, args.weight_decay, mIoU))
-            print("[Epoch {}] mIoU is {:.3f}\n".format(epoch, mIoU))
+            # mIoU = 0.0
+            
+            # print("[Epoch {}] mIoU is {:.3f}\n".format(epoch, mIoU))
 
         print("[Epoch {}] Training and evaluation complete!\n".format(epoch))
 
@@ -147,6 +151,7 @@ def main(args):
     """Performs the necessary operations once the arguments have been parsed"""
     # For reproducibility
     torch.manual_seed(42)
+    random.seed(42)
 
     print("Loading datasets...")
     train_ds, valid_ds = load_cityscapes_datasets(args.dataset_folder)
@@ -155,6 +160,8 @@ def main(args):
     print("Setting up model, optimizer, and loss function...")
     model, optimizer, loss_fn = setup_model(args)
     print("Done!\n")
+        
+    start_epoch = 1
 
     if args.checkpoint_path:
         print("Loading checkpoint...")
@@ -166,7 +173,7 @@ def main(args):
             start_epoch, train_losses, valid_losses = 1, [], []
 
         num_epochs = start_epoch + args.num_epochs
-
+        
         print("Setting up learning rate scheduler...")
         lr_scheduler = PolynomialLRScheduler(optimizer, args.learning_rate, len(train_ds), num_epochs - 1)
         print("Done!\n")

@@ -1,6 +1,6 @@
 from encoder import Encoder
 from dataset import load_cityscapes_datasets
-from utils import save_model_checkpoint, load_model_checkpoint, plot_save_losses, create_lr_scheduler
+from utils import save_model_checkpoint, load_model_checkpoint, plot_save_losses
 from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from tqdm import tqdm
@@ -26,7 +26,7 @@ NUM_WARMUP_EPOCHS = 3
 LR = 1e-3
 MOMENTUM = 0.9
 WEIGHT_DECAY = 1e-4
-IS_TRAINING_MODEL = True
+IS_TRAINING_MODEL = False
 
 def setup_model(ignore_index):
     """Sets up the model"""
@@ -129,10 +129,12 @@ if __name__ == "__main__":
     torch.manual_seed(42)
 
     print("Loading datasets...")
-    train_ds, valid_ds, ignore_index = load_cityscapes_datasets(CITYSCAPES_ROOT_FILEPATH)
+    ignore_index = 255
+    train_ds, valid_ds = load_cityscapes_datasets(CITYSCAPES_ROOT_FILEPATH)
     print("Done!\n")
     
-#     img, lbl = train_ds[50]
+    img, lbl = valid_ds[50]
+    print("lbl.size():", lbl.size())
 #     pil_img_trans = transforms.ToPILImage()
 #     img, lbl = pil_img_trans(img), pil_img_trans(lbl)
 #     img.save("input.png")
@@ -144,7 +146,7 @@ if __name__ == "__main__":
 
     if IS_TRAINING_MODEL:
         print("Training model...\n")
-        start_epoch, train_losses, valid_losses = load_model_checkpoint(model, optimizer, "deeplabv3_epoch10_lr0.001", lr_scheduler)
+        start_epoch, train_losses, valid_losses = load_model_checkpoint(model, optimizer, "deeplabv3_epoch30_lr0.001_wd0.0001", lr_scheduler)
 #         start_epoch = 0
 #         train_losses, valid_losses = [], []
         num_epochs = start_epoch + NUM_EPOCHS
@@ -157,7 +159,7 @@ if __name__ == "__main__":
         print("Done!")
     else:
         print("Loading pretrained model...")
-        load_model_checkpoint(model, optimizer, "deeplabv3_epoch10_lr{}".format(LR))
+        load_model_checkpoint(model, optimizer, "deeplabv3_epoch10_lr0.01_wd0.0005")
         print("Done!\n")
 
         evaluate_save_predictions(model, valid_ds, CITYSCAPES_RESULTS_FILEPATH)

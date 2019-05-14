@@ -18,7 +18,8 @@ class CustomCityscapes(Cityscapes):
         super(CustomCityscapes, self).__init__(root, split=split, mode=mode, target_type=target_type, transform=transform, target_transform=target_transform)
         
         if self.split == "train":
-            self.random_resized_crop_transform = transforms.RandomResizedCrop(CROP_IMG_SIZE, scale=(0.5, 2.0), ratio=(1.0, 1.0))
+            self.random_affine_transform = transforms.RandomAffine(0, scale=(0.5, 2.0))
+            self.random_crop = transforms.RandomCrop(CROP_IMG_SIZE)
             self.img_transform = transforms.Compose([
                 transforms.ToTensor(),
                 transforms.Normalize(IMGNET_MEAN, IMGNET_STD)
@@ -29,9 +30,15 @@ class CustomCityscapes(Cityscapes):
         image, target = super().__getitem__(index)
 
         if self.split == "train":
-            i, j, h, w = self.random_resized_crop_transform.get_params(image, self.random_resized_crop_transform.scale, self.random_resized_crop_transform.ratio)
-            image = F.resized_crop(image, i, j, h, w, self.random_resized_crop_transform.size, PIL.Image.BILINEAR)
-            target = F.resized_crop(target, i, j, h, w, self.random_resized_crop_transform.size, PIL.Image.NEAREST)
+            # Randomly scale the image and target
+            random_scale_params = self.random_affine_transform.get_params(self.random_affine_transform.degrees, self.random_affine_transform.translate, self.random_affine_transform.scale, self.random_affine_transform.shear, image.size)
+            image = F.affine(image, *random_scale_params, resample=self.random_affine_transform.resample, fillcolor=self.random_affine_transform.fillcolor)
+            target = F.affine(target, *random_scale_params, resample=self.random_affine_transform.resample, fillcolor=self.random_affine_transform.fillcolor)
+
+            # Randomly crop the image and target
+            i, j, h, w = self.random_crop.get_params(image, self.random_crop.size)
+            image = F.crop(image, i, j, h, w)
+            target = F.crop(target, i, j, h, w)
 
             if random.random() <= HFLIP_PROB:
                 image = F.hflip(image)
