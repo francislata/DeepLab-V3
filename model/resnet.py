@@ -1,7 +1,7 @@
 # This is a modified version of PyTorch's original implementation of ResNet model architecture.
 # Credits: https://github.com/pytorch/vision/blob/master/torchvision/models/resnet.py
 
-from model_utils import initialize_module_weights
+from .model_utils import initialize_module_weights
 import torch.nn as nn
 import math
 import torch.utils.model_zoo as model_zoo

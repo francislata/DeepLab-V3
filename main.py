@@ -1,62 +1,54 @@
-from encoder import Encoder
+from model.encoder import Encoder
 from dataset import load_cityscapes_datasets
-from utils import save_model_checkpoint, load_model_checkpoint, plot_save_losses
-from torch.utils.data import DataLoader
-import torchvision.transforms as transforms
+from utils.utils import save_model_checkpoint, load_model_checkpoint, plot_save_losses
+from utils.scheduler import PolynomialLRScheduler
 from tqdm import tqdm
-from cityscapesScripts.cityscapesscripts.evaluation.evalPixelLevelSemanticLabeling import main
-from lr_scheduler import PolynomialLR
-import torch
+from torch.utils.data import DataLoader
+from cityscapesScripts.cityscapesscripts.evaluation import evalPixelLevelSemanticLabeling
+import torchvision.transforms as transforms
+import argparse
 import torch.optim as optim
 import torch.nn as nn
-import numpy as np
+import torch
 import os
-import PIL
+import random
 
 # Constants
-CITYSCAPES_ROOT_FILEPATH = "./cityscapes-dataset"
-CITYSCAPES_RESULTS_FILEPATH = "./cityscapes-results/{}"
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-TRAIN_BATCH_SIZE = 4
-EVAL_BATCH_SIZE = 4
-EVAL_SAVE_BATCH_SIZE = 1
-NUM_CLASSES = 19
-NUM_EPOCHS = 5
-NUM_WARMUP_EPOCHS = 3
-LR = 1e-3
+LEARNING_RATE = 1e-2
 MOMENTUM = 0.9
-WEIGHT_DECAY = 1e-4
-IS_TRAINING_MODEL = False
+WEIGHT_DECAY = 5e-4
+SAVE_CHECKPOINT_INDEX = 5
+TRAIN_BATCH_SIZE, EVAL_BATCH_SIZE, EVAL_METRIC_BATCH_SIZE = 8, 8, 1
+NUM_EPOCHS = 30
+IGNORE_INDEX = 255
+NUM_CLASSES = 19
+RESULTS_PATH = "cityscapes-results/{}"
+NUM_WORKERS = 4
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def setup_model(ignore_index):
+def setup_model(args):
     """Sets up the model"""
-    encoder_model = Encoder(NUM_CLASSES).to(DEVICE)
-    optimizer = optim.SGD(encoder_model.parameters(), lr=LR, momentum=MOMENTUM, weight_decay=WEIGHT_DECAY)
-#     lr_scheduler = PolynomialLR(optimizer, NUM_EPOCHS, NUM_WARMUP_EPOCHS, LR, WARMUP_LR)
-    lr_scheduler = None
-    loss_fn = nn.CrossEntropyLoss(ignore_index=ignore_index).to(DEVICE)
+    model = Encoder(args.num_classes).to(DEVICE)
+    optimizer = optim.SGD(model.parameters(), lr=args.learning_rate, momentum=args.momentum, weight_decay=args.weight_decay)
+    loss_fn = nn.CrossEntropyLoss(ignore_index=args.ignore_index).to(DEVICE)
 
-    return encoder_model, optimizer, lr_scheduler, loss_fn
+    return model, optimizer, loss_fn
 
-def train(model, optimizer, loss_fn, train_ds, valid_ds, start_epoch=1, num_epochs=NUM_EPOCHS, lr_scheduler=None):
+def train(model, optimizer, loss_fn, train_ds, valid_ds, start_epoch, num_epochs, lr_scheduler, args, train_losses=[], valid_losses=[]):
     """Trains the model"""
-    train_dl = DataLoader(train_ds, batch_size=TRAIN_BATCH_SIZE, shuffle=True, num_workers=4)
-    train_losses = []
-    valid_losses = []
+    train_dl = DataLoader(train_ds, batch_size=args.train_batch_size, shuffle=True, num_workers=NUM_WORKERS)
 
-    for epoch in range(start_epoch, num_epochs + 1):
+    for epoch in range(start_epoch, num_epochs):
         print("[Epoch {}] Training and evaluation starts...".format(epoch))
 
         torch.cuda.empty_cache()
-
-        if lr_scheduler is not None:
-            lr_scheduler.step()
         
         model.train()
         total_loss = []
 
-        for imgs, anns in tqdm(train_dl, desc="Training progress"):
+        for idx, (imgs, anns) in enumerate(tqdm(train_dl, desc="Training progress")):
             optimizer.zero_grad()
+            lr_scheduler.step(epoch - 1, idx)
 
             imgs, anns = imgs.to(DEVICE), anns.squeeze().long().to(DEVICE)
             outputs = model(imgs)
@@ -72,24 +64,21 @@ def train(model, optimizer, loss_fn, train_ds, valid_ds, start_epoch=1, num_epoc
 
         print("[Epoch {}] Training loss is {:.2f}\n".format(epoch, epoch_loss))
 
-        valid_losses.append(evaluate(model, loss_fn, valid_ds))
+        valid_losses.append(evaluate(model, loss_fn, valid_ds, args))
 
-        if epoch % 5 == 0:
-            print("[Epoch {}] Calculating mIoU...".format(epoch))
-            evaluate_save_predictions(model, valid_ds, CITYSCAPES_RESULTS_FILEPATH)
-            mIoU = main()
-            print("[Epoch {}] mIoU is {:.3f}\n".format(epoch, mIoU))
-            save_model_checkpoint(model, optimizer, train_losses, valid_losses, num_epochs, "deeplabv3_epoch{}_lr{}_mIoU{:.3f}".format(epoch, LR, mIoU), lr_scheduler=lr_scheduler)
+        if epoch % args.save_checkpoint_index == 0:
+            print("Saving checkpoint and plotting losses...")
+            save_model_checkpoint(model, optimizer, train_losses, valid_losses, num_epochs, "deeplabv3_epoch{}_lr{}_wd{}".format(epoch, args.learning_rate, args.weight_decay))
+            plot_save_losses(train_losses, valid_losses, "Training and Validation Losses", "deeplabv3_epoch{}_lr{}_wd{}".format(epoch, args.learning_rate, args.weight_decay))
+            print("Done!\n")
 
         print("[Epoch {}] Training and evaluation complete!\n".format(epoch))
 
-    return train_losses, valid_losses
-
-def evaluate(model, loss_fn, dataset):
+def evaluate(model, loss_fn, dataset, args):
     """Evaluates the model"""
     model.eval()
 
-    dl = DataLoader(dataset, batch_size=EVAL_BATCH_SIZE, shuffle=False, num_workers=4)
+    dl = DataLoader(dataset, batch_size=args.eval_batch_size, num_workers=NUM_WORKERS)
 
     with torch.no_grad():
         torch.cuda.empty_cache()
@@ -101,15 +90,16 @@ def evaluate(model, loss_fn, dataset):
             outputs = model(imgs)
             total_loss.append(loss_fn(outputs, anns).item())
 
-        print("Evaluation loss is {:.2f}\n".format(sum(total_loss) / len(total_loss)))
+        loss = sum(total_loss) / len(total_loss)
+        print("Evaluation loss is {:.2f}\n".format(loss))
 
-        return sum(total_loss) / len(total_loss)
+        return loss
 
-def evaluate_save_predictions(model, dataset, filepath):
+def evaluate_save_predictions(model, dataset, args):
     """Evaluates the model with the given dataset and saves the entries in the given filepath"""
     model.eval()
 
-    dl = DataLoader(dataset, batch_size=EVAL_SAVE_BATCH_SIZE, num_workers=4)
+    dl = DataLoader(dataset, batch_size=EVAL_METRIC_BATCH_SIZE, num_workers=NUM_WORKERS)
     img_transform = transforms.ToPILImage()
 
     with torch.no_grad():
@@ -122,46 +112,76 @@ def evaluate_save_predictions(model, dataset, filepath):
             output = img_transform(output)
 
             filename = os.path.basename(dataset.images[idx]).replace("_leftImg8bit", "*")
-            output.save(CITYSCAPES_RESULTS_FILEPATH.format(filename))
+            output.save(args.results_path.format(filename))
 
-if __name__ == "__main__":
-    # Setting seed number for reproducibility
+def parse_arguments():
+    """Handles the command line arguments and proceeds with training or evaluation of the model"""
+    args_parser = argparse.ArgumentParser(description="DeepLab V3 Training and Evaluation")
+
+    # Required arguments
+    args_parser.add_argument("dataset_folder", type=str, help="the root folder of the dataset")
+    args_parser.add_argument("model_checkpoint_folder", type=str, help="the checkpoint folder for the model")
+    args_parser.add_argument("losses_folder", type=str, help="the folder to store the losses graphs")
+
+    # Optional arguments
+    args_parser.add_argument("--learning-rate", type=float, default=LEARNING_RATE, help="learning rate to use for SGD optimizer")
+    args_parser.add_argument("--momentum", type=float, default=MOMENTUM, help="momentum to use for SGD optimizer")
+    args_parser.add_argument("--weight-decay", type=float, default=WEIGHT_DECAY, help="L2 regularization to use for SGD optimizer")
+    args_parser.add_argument("--train-batch-size", type=int, default=TRAIN_BATCH_SIZE, help="the batch size to use when training the model")
+    args_parser.add_argument("--eval-batch-size", type=int, default=EVAL_BATCH_SIZE, help="the batch size to use when evaluating the model")
+    args_parser.add_argument("--num-epochs", type=int, default=NUM_EPOCHS, help="the total number of epochs to train the model for")
+    args_parser.add_argument("--save-checkpoint-index", type=int, default=SAVE_CHECKPOINT_INDEX, help="the number when to make a checkpoint of the model")
+    args_parser.add_argument("--is-training-model", action="store_true", help="indicates whether to train a model")
+    args_parser.add_argument("--is-evaluating-model", action="store_true", help="indicates whether to evaluate a model")
+    args_parser.add_argument("--ignore-index", type=int, default=IGNORE_INDEX, help="the ignore index to use in the dataset")
+    args_parser.add_argument("--num-classes", type=int, default=NUM_CLASSES, help="the number of classes in the dataset")
+    args_parser.add_argument("--results-path", type=str, default=RESULTS_PATH, help="the path to put the model's predictions at")
+    args_parser.add_argument("--checkpoint-path", type=str, help="the path to a model checkpoint")
+
+    return args_parser.parse_args()
+
+def main(args):
+    """Performs the necessary operations once the arguments have been parsed"""
+    # For reproducibility
     torch.manual_seed(42)
+    random.seed(42)
 
     print("Loading datasets...")
-    ignore_index = 255
-    train_ds, valid_ds = load_cityscapes_datasets(CITYSCAPES_ROOT_FILEPATH)
-    print("Done!\n")
-    
-    img, lbl = valid_ds[50]
-    print("lbl.size():", lbl.size())
-#     pil_img_trans = transforms.ToPILImage()
-#     img, lbl = pil_img_trans(img), pil_img_trans(lbl)
-#     img.save("input.png")
-#     lbl.save("lbl.png")
-
-    print("Setting up model, optimizer, learning rate scheduler, and loss function...")
-    model, optimizer, lr_scheduler, loss_fn = setup_model(ignore_index)
+    train_ds, valid_ds = load_cityscapes_datasets(args.dataset_folder)
     print("Done!\n")
 
-    if IS_TRAINING_MODEL:
-        print("Training model...\n")
-        start_epoch, train_losses, valid_losses = load_model_checkpoint(model, optimizer, "deeplabv3_epoch30_lr0.001_wd0.0001", lr_scheduler)
-#         start_epoch = 0
-#         train_losses, valid_losses = [], []
-        num_epochs = start_epoch + NUM_EPOCHS
-        start_epoch += 1
-        current_train_losses, current_valid_losses = train(model, optimizer, loss_fn, train_ds, valid_ds, start_epoch=start_epoch, num_epochs=num_epochs, lr_scheduler=lr_scheduler)
-        train_losses.extend(current_train_losses)
-        valid_losses.extend(current_valid_losses)
-        plot_save_losses(train_losses, valid_losses, "Training and Validation Losses", "losses_epoch{}_lr{}".format(num_epochs, LR))
-        save_model_checkpoint(model, optimizer, train_losses, valid_losses, num_epochs, "deeplabv3_epoch{}_lr{}".format(num_epochs, LR), lr_scheduler=lr_scheduler)
-        print("Done!")
-    else:
-        print("Loading pretrained model...")
-        load_model_checkpoint(model, optimizer, "deeplabv3_epoch10_lr0.01_wd0.0005")
+    print("Setting up model, optimizer, and loss function...")
+    model, optimizer, loss_fn = setup_model(args)
+    print("Done!\n")
+        
+    start_epoch = 1
+
+    if args.checkpoint_path:
+        print("Loading checkpoint...")
+        start_epoch, train_losses, valid_losses = load_model_checkpoint(model, optimizer, args.checkpoint_path)
         print("Done!\n")
 
-        evaluate_save_predictions(model, valid_ds, CITYSCAPES_RESULTS_FILEPATH)
-        mIoU = main()
-        print("mIoU is {:.3f}\n".format(mIoU))
+    if args.is_training_model:
+        if args.checkpoint_path is None:
+            start_epoch, train_losses, valid_losses = 1, [], []
+            
+        num_epochs = start_epoch + args.num_epochs
+        
+        print("Setting up learning rate scheduler...")
+        lr_scheduler = PolynomialLRScheduler(optimizer, args.learning_rate, len(train_ds), num_epochs - 1)
+        print("Done!\n")
+
+        print("Training model...\n")
+        train(model, optimizer, loss_fn, train_ds, valid_ds, start_epoch, num_epochs, lr_scheduler, args, train_losses=train_losses, valid_losses=valid_losses)
+        print("Done!")
+    elif args.is_evaluating_model:
+        print("Evaluating model on the validation set...")
+        evaluate_save_predictions(model, valid_ds, args)
+        print("Done!\n")
+
+        print("Calculating mIoU...")
+        mIoU = evalPixelLevelSemanticLabeling.main()
+        print("mIoU is {:.3f}".format(mIoU))
+
+if __name__ == "__main__":
+    main(parse_arguments())

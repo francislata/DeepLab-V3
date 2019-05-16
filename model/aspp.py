@@ -1,4 +1,4 @@
-from model_utils import create_convolutional_layer
+from .model_utils import create_convolutional_layer
 import torch.nn as nn
 import torch
 

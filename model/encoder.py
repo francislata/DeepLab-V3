@@ -1,6 +1,6 @@
-from resnet import resnet101
-from aspp import ASPP
-from model_utils import create_convolutional_layer
+from .resnet import resnet101
+from .aspp import ASPP
+from .model_utils import create_convolutional_layer
 import torch.nn as nn
 
 class Encoder(nn.Module):
