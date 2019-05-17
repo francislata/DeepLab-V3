@@ -31,5 +31,12 @@ In this project, I am able to achieve a mean intersection over union score of **
 Since the model checkpoint file is quite large of a size, I have placed it in a public Dropbox folder found [here](https://www.dropbox.com/sh/u31sx5ahu91w9o7/AABVsUwJkpslm5QXAgk_0wOea?dl=0). In order to load this, place this inside `<model-checkpoint-folder>` and pass the filename without the extension to the `--checkpoint-path` option.
 
 ## Example
-Here is an example of a mask produced by the model shown alongside the original image:
-![](sample_images/mask.png) ![](sample_images/original.png)
+Here is an example of a mask produced by the model and the original image:
+
+**Mask image:**
+
+![](sample_images/mask.png)
+
+**Original image:**
+
+![](sample_images/original.png)
